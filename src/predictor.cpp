@@ -4,6 +4,8 @@
 //                                                        //
 //  Implement the various branch predictors below as      //
 //  described in the README                               //
+//                                                        //
+// This code is implemented by Mayank Kumar               //
 //========================================================//
 #include <stdio.h>
 #include <math.h>
