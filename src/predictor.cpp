@@ -14,9 +14,9 @@
 //
 // TODO:Student Information
 //
-const char *studentName = "TODO";
-const char *studentID = "TODO";
-const char *email = "TODO";
+const char *studentName = "Mayank Kumar";
+const char *studentID = "A69030454";
+const char *email = "mak025@ucsd.edu";
 
 //------------------------------------//
 //      Predictor Configuration       //
@@ -41,6 +41,23 @@ int verbose;
 // gshare
 uint8_t *bht_gshare;
 uint64_t ghistory;
+
+
+//21264 Alpha processor : tournament predictor
+
+// t = table
+// r = register 
+int tourney_lhistoryBits = 10; // Number of bits used for Local History
+int tourney_ghistoryBits = 12; // Number of bits used for Global History
+int tourney_choiceBits   = 12; // Number of bits used for Choice History
+uint32_t *tourney_local_ht;
+uint32_t tourney_global_hr;
+
+uint8_t *tourney_local_pred;
+uint8_t *tourney_global_pred;
+uint8_t *tourney_choice_pred;
+
+
 
 //------------------------------------//
 //        Predictor Functions         //
@@ -122,6 +139,96 @@ void cleanup_gshare()
   free(bht_gshare);
 }
 
+
+//Tourney Predictor : 
+// tourament functions
+void init_tourney()
+{
+  int local_bht_entries = 1 << tourney_lhistoryBits;
+  tourney_local_pred = (uint8_t *)malloc(local_bht_entries * sizeof(uint8_t));
+  tourney_local_ht = (uint32_t *)malloc(local_bht_entries * sizeof(uint32_t));
+  int i = 0;
+  for (i = 0; i < local_bht_entries; i++)
+  {
+    tourney_local_pred[i] = WN3;
+    tourney_local_ht[i] = 0;
+  }
+
+
+
+  int global_bht_entries = 1 << tourney_ghistoryBits;
+  tourney_global_pred = (uint8_t *)malloc(global_bht_entries * sizeof(uint8_t));
+  for (i = 0; i < global_bht_entries; i++)
+  {
+    tourney_global_pred[i] = WN;
+  }
+
+  int choice_t_entries = 1 << tourney_choiceBits;
+  tourney_choice_pred = (uint8_t *)malloc(choice_t_entries * sizeof(uint8_t));
+  for (i = 0; i < choice_t_entries; i++)
+  {
+    tourney_choice_pred[i] = WG;
+  }
+
+}
+
+uint8_t tourney_predict(uint32_t pc)
+{
+  // First we need to choose if we're using local or global tables so we use the choice predictor
+  uint32_t choice_t_entries = 1 << tourney_choiceBits; 
+  uint32_t ghr_lower_bits = tourney_global_hr & (choice_t_entries - 1);
+
+  if (tourney_choice_pred[ghr_lower_bits] == WG || tourney_choice_pred[ghr_lower_bits] == SG ) {
+    // we should use the global predictor here
+    switch (tourney_global_pred[ghr_lower_bits])
+    {
+    case WN:
+        return NOTTAKEN;
+    case SN:
+        return NOTTAKEN;
+    case WT:
+        return TAKEN;
+    case ST:
+        return TAKEN;
+    default:
+        printf("Warning: Undefined state of entry in TOURNEY GLOBAL BHT!\n");
+        return NOTTAKEN;
+    }
+  } else if (tourney_choice_pred[ghr_lower_bits] == WL || tourney_choice_pred[ghr_lower_bits] == SL ) {
+    // we should use the local predictor here
+    // need to index using pc[9:0]
+    int local_bht_entries = 1 << tourney_lhistoryBits;
+    uint32_t pc_lower_bits = pc & (local_bht_entries - 1);
+    uint32_t index = tourney_local_ht[pc_lower_bits] & (local_bht_entries - 1);
+    switch (tourney_local_pred[index])
+    {
+    case WN1:
+        return NOTTAKEN;
+    case WN2:
+        return NOTTAKEN;
+    case WN3:
+        return NOTTAKEN;
+    case SN0:
+        return NOTTAKEN;
+    case WT1:
+        return TAKEN;
+    case WT2:
+        return TAKEN;
+    case WT3:
+        return TAKEN;
+    case ST0:
+        return TAKEN;
+    default:
+        printf("Warning: Undefined state of entry in TOURNEY GLOBAL BHT!\n");
+        return NOTTAKEN;
+    }
+  } else {
+    printf("Warning: Choice predictor gave an invalid value!\n");
+    return NOTTAKEN;
+  }
+}
+
+
 void init_predictor()
 {
   switch (bpType)
@@ -132,6 +239,7 @@ void init_predictor()
     init_gshare();
     break;
   case TOURNAMENT:
+    init_tourney();
     break;
   case CUSTOM:
     break;
@@ -155,7 +263,7 @@ uint32_t make_prediction(uint32_t pc, uint32_t target, uint32_t direct)
   case GSHARE:
     return gshare_predict(pc);
   case TOURNAMENT:
-    return NOTTAKEN;
+    return tourney_predict(pc);
   case CUSTOM:
     return NOTTAKEN;
   default:

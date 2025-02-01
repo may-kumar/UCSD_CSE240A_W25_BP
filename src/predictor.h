@@ -38,6 +38,25 @@ extern const char *bpName[];
 #define WT 2 // predict T, weak taken
 #define ST 3 // predict T, strong taken
 
+
+/* Defines added by Mayank Kumar */
+
+// Definitions for 3-bit counters
+#define SN0 0 // predict NT, strong not taken
+#define WN1 1 // predict NT, weak not taken
+#define WN2 2 // predict NT, weak not taken
+#define WN3 3 // predict NT, weak not taken
+#define WT3 4 // predict T, weak taken
+#define WT2 5 // predict T, weak taken
+#define WT1 6 // predict T, weak taken
+#define ST0 7 // predict T, strong taken
+
+// Definitions for 2bc for choice predictor
+#define SG 0 // use Global
+#define WG 1 // use Global
+#define WL 2 // use Local
+#define SL 3 // use Local
+
 //------------------------------------//
 //      Predictor Configuration       //
 //------------------------------------//
