@@ -172,14 +172,10 @@ void init_tourney()
 
 }
 
-uint8_t tourney_predict(uint32_t pc)
-{
-  // First we need to choose if we're using local or global tables so we use the choice predictor
-  uint32_t choice_t_entries = 1 << tourney_choiceBits; 
-  uint32_t ghr_lower_bits = tourney_global_hr & (choice_t_entries - 1);
+uint8_t tourney_predict_global(uint32_t pc) {
+    uint32_t choice_t_entries = 1 << tourney_choiceBits; 
+    uint32_t ghr_lower_bits = tourney_global_hr & (choice_t_entries - 1);
 
-  if (tourney_choice_pred[ghr_lower_bits] == WG || tourney_choice_pred[ghr_lower_bits] == SG ) {
-    // we should use the global predictor here
     switch (tourney_global_pred[ghr_lower_bits])
     {
     case WN:
@@ -194,8 +190,9 @@ uint8_t tourney_predict(uint32_t pc)
         printf("Warning: Undefined state of entry in TOURNEY GLOBAL BHT!\n");
         return NOTTAKEN;
     }
-  } else if (tourney_choice_pred[ghr_lower_bits] == WL || tourney_choice_pred[ghr_lower_bits] == SL ) {
-    // we should use the local predictor here
+}
+
+uint8_t tourney_predict_local(uint32_t pc) {
     // need to index using pc[9:0]
     int local_bht_entries = 1 << tourney_lhistoryBits;
     uint32_t pc_lower_bits = pc & (local_bht_entries - 1);
@@ -222,10 +219,122 @@ uint8_t tourney_predict(uint32_t pc)
         printf("Warning: Undefined state of entry in TOURNEY GLOBAL BHT!\n");
         return NOTTAKEN;
     }
+}
+
+uint8_t tourney_predict(uint32_t pc)
+{
+  // First we need to choose if we're using local or global tables so we use the choice predictor
+  uint32_t choice_t_entries = 1 << tourney_choiceBits; 
+  uint32_t ghr_lower_bits = tourney_global_hr & (choice_t_entries - 1);
+
+  if (tourney_choice_pred[ghr_lower_bits] == WG || tourney_choice_pred[ghr_lower_bits] == SG ) {
+    // we should use the global predictor here
+        return tourney_predict_global(pc);
+  } else if (tourney_choice_pred[ghr_lower_bits] == WL || tourney_choice_pred[ghr_lower_bits] == SL ) {
+        // we should use the local predictor here
+        return tourney_predict_local(pc);
   } else {
     printf("Warning: Choice predictor gave an invalid value!\n");
     return NOTTAKEN;
   }
+}
+
+
+
+void train_tourney(uint32_t pc, uint8_t outcome)
+{
+
+    uint32_t choice_t_entries = 1 << tourney_choiceBits; 
+    uint32_t ghr_lower_bits = tourney_global_hr & (choice_t_entries - 1);
+
+    uint32_t local_bht_entries = 1 << tourney_lhistoryBits;
+    uint32_t pc_lower_bits = pc & (local_bht_entries - 1);
+    uint32_t index = tourney_local_ht[pc_lower_bits] & (local_bht_entries - 1);
+
+    bool global_correct;
+    bool local_correct;
+    
+    global_correct = (tourney_predict_global(pc) == outcome);
+    local_correct = (tourney_predict_local(pc) == outcome);
+
+    // update the choice predictor to choose the correct one next time
+    if (global_correct ^ local_correct) {
+        switch (tourney_choice_pred[ghr_lower_bits])
+        {
+        case SG:
+            tourney_choice_pred[ghr_lower_bits] = (global_correct) ? SG : WG;
+            break;
+        case WG:
+            tourney_choice_pred[ghr_lower_bits] = (global_correct) ? SG : WL;
+            break;
+        case WL:
+            tourney_choice_pred[ghr_lower_bits] = (global_correct) ? WG : SL;
+            break;
+        case SL:
+            tourney_choice_pred[ghr_lower_bits] = (global_correct) ? WL : SL;
+            break;
+        default:
+            printf("Warning: Undefined state of entry in tourney choice!\n");
+            break;
+        }
+    }
+
+
+    // Update state of entry in bht based on outcome
+    switch (tourney_local_pred[index])
+    {
+        case WN1:
+            tourney_local_pred[index] = (outcome == TAKEN) ? WT1 : WN2;
+            break;
+        case WN2:
+            tourney_local_pred[index] = (outcome == TAKEN) ? WN1 : WN3;
+            break;
+        case WN3:
+            tourney_local_pred[index] = (outcome == TAKEN) ? WN2 : SN0;
+            break;
+        case SN0:
+            tourney_local_pred[index] = (outcome == TAKEN) ? WN3 : SN0;
+            break;
+        case WT1:
+            tourney_local_pred[index] = (outcome == TAKEN) ? WT2 : WN1;
+            break;
+        case WT2:
+            tourney_local_pred[index] = (outcome == TAKEN) ? WT3 : WT1;
+            break;
+        case WT3:
+            tourney_local_pred[index] = (outcome == TAKEN) ? ST0 : WT2;
+            break;
+        case ST0:
+            tourney_local_pred[index] = (outcome == TAKEN) ? ST0 : WT3;
+            break;
+        default:
+            printf("Warning: Undefined state of entry in TOURNEY GLOBAL BHT!\n");
+            break;
+    }
+
+    // Update state of entry in bht based on outcome
+    switch (tourney_global_pred[ghr_lower_bits])
+    {
+        case WN:
+            tourney_global_pred[ghr_lower_bits] = (outcome == TAKEN) ? WT : SN;
+            break;
+        case SN:
+            tourney_global_pred[ghr_lower_bits] = (outcome == TAKEN) ? WN : SN;
+            break;
+        case WT:
+            tourney_global_pred[ghr_lower_bits] = (outcome == TAKEN) ? ST : WN;
+            break;
+        case ST:
+            tourney_global_pred[ghr_lower_bits] = (outcome == TAKEN) ? ST : WT;
+            break;
+        default:
+            printf("Warning: Undefined state of entry in GLOBAL TOURNEY BHT!\n");
+            break;
+    }
+
+    // Update history registers
+    tourney_global_hr = ((tourney_global_hr << 1) | outcome);
+    tourney_local_ht[pc_lower_bits] = ((tourney_local_ht[pc_lower_bits] << 1) | outcome);
 }
 
 
@@ -290,7 +399,7 @@ void train_predictor(uint32_t pc, uint32_t target, uint32_t outcome, uint32_t co
     case GSHARE:
       return train_gshare(pc, outcome);
     case TOURNAMENT:
-      return;
+      return train_tourney(pc, outcome);
     case CUSTOM:
       return;
     default:
