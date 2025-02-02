@@ -46,10 +46,10 @@ uint64_t ghistory;
 //21264 Alpha processor : tournament predictor
 
 // t = table
-// r = register 
+// r = register
 uint32_t tourney_lhistoryBits = 10; // Number of bits used for Local History
-uint32_t tourney_ghistoryBits = 12; // Number of bits used for Global History
-uint32_t tourney_choiceBits   = 12; // Number of bits used for Choice Table
+uint32_t tourney_ghistoryBits = 16; // Number of bits used for Global History
+uint32_t tourney_choiceBits   = 16; // Number of bits used for Choice Table
 uint32_t *tourney_local_ht;
 uint32_t tourney_global_hr;
 
@@ -140,7 +140,7 @@ void cleanup_gshare()
 }
 
 
-//Tourney Predictor : 
+//Tourney Predictor :
 // tourament functions
 void init_tourney()
 {
@@ -229,6 +229,8 @@ void train_tourney(uint32_t pc, uint8_t outcome) {
     tourney_local_ht[pht_index] = ( (tourney_local_ht[pht_index] << 1) | outcome ) & (local_bht_entries - 1);
 }
 
+
+// FOR THE CUSTOM PREDICTOR
 
 
 void init_predictor()
