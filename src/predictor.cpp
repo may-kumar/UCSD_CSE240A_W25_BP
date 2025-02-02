@@ -150,7 +150,7 @@ void init_tourney()
   int i = 0;
   for (i = 0; i < local_bht_entries; i++)
   {
-    tourney_local_pred[i] = SN0;
+    tourney_local_pred[i] = WT3;
     tourney_local_ht[i] = 0;
   }
 
@@ -160,7 +160,7 @@ void init_tourney()
   tourney_global_pred = (uint8_t *)malloc(global_bht_entries * sizeof(uint8_t));
   for (i = 0; i < global_bht_entries; i++)
   {
-    tourney_global_pred[i] = SN;
+    tourney_global_pred[i] = WT;
   }
 
   int choice_t_entries = 1 << tourney_choiceBits;
@@ -377,7 +377,7 @@ uint32_t make_prediction(uint32_t pc, uint32_t target, uint32_t direct)
   case TOURNAMENT:
     return tourney_predict(pc);
   case CUSTOM:
-    return NOTTAKEN;
+    return tourney_predict(pc);
   default:
     break;
   }
