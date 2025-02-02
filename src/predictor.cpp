@@ -150,11 +150,9 @@ void init_tourney()
   int i = 0;
   for (i = 0; i < local_bht_entries; i++)
   {
-    tourney_local_pred[i] = WT3;
+    tourney_local_pred[i] = WT;
     tourney_local_ht[i] = 0;
   }
-
-
 
   int global_bht_entries = 1 << tourney_ghistoryBits;
   tourney_global_pred = (uint8_t *)malloc(global_bht_entries * sizeof(uint8_t));
@@ -167,9 +165,8 @@ void init_tourney()
   tourney_choice_pred = (uint8_t *)malloc(choice_t_entries * sizeof(uint8_t));
   for (i = 0; i < choice_t_entries; i++)
   {
-    tourney_choice_pred[i] = SG;
+    tourney_choice_pred[i] = WG;
   }
-
 }
 
 uint8_t tourney_predict_global(uint32_t pc) {
@@ -199,25 +196,36 @@ uint8_t tourney_predict_local(uint32_t pc) {
     uint32_t index = tourney_local_ht[pc_lower_bits] & (local_bht_entries - 1);
     switch (tourney_local_pred[index])
     {
-    case SN0:
+    case SN:
         return NOTTAKEN;
-    case WN1:
+    case WN:
         return NOTTAKEN;
-    case WN2:
-        return NOTTAKEN;
-    case WN3:
-        return NOTTAKEN;
-    case WT3:
+    case WT:
         return TAKEN;
-    case WT2:
-        return TAKEN;
-    case WT1:
-        return TAKEN;
-    case ST0:
+    case ST:
         return TAKEN;
     default:
-        printf("Warning: Undefined state of entry in TOURNEY GLOBAL BHT!\n");
+        printf("Warning: Undefined state of entry in TOURNEY LOCAL BHT!\n");
         return NOTTAKEN;
+    // case SN0:
+    //     return NOTTAKEN;
+    // case WN1:
+    //     return NOTTAKEN;
+    // case WN2:
+    //     return NOTTAKEN;
+    // case WN3:
+    //     return NOTTAKEN;
+    // case WT3:
+    //     return TAKEN;
+    // case WT2:
+    //     return TAKEN;
+    // case WT1:
+    //     return TAKEN;
+    // case ST0:
+    //     return TAKEN;
+    // default:
+    //     printf("Warning: Undefined state of entry in TOURNEY GLOBAL BHT!\n");
+    //     return NOTTAKEN;
     }
 }
 
@@ -285,33 +293,48 @@ void train_tourney(uint32_t pc, uint8_t outcome)
     // Update state of entry in bht based on outcome
     switch (tourney_local_pred[index])
     {
-        case SN0:
-            tourney_local_pred[index] = (outcome == TAKEN) ? WN1 : SN0;
+        case SN:
+            tourney_local_pred[index] = (outcome == TAKEN) ? WN : SN;
             break;
-        case WN1:
-            tourney_local_pred[index] = (outcome == TAKEN) ? WN2 : SN0;
+        case WN:
+            tourney_local_pred[index] = (outcome == TAKEN) ? WT : SN;
             break;
-        case WN2:
-            tourney_local_pred[index] = (outcome == TAKEN) ? WN3 : WN1;
+        case WT:
+            tourney_local_pred[index] = (outcome == TAKEN) ? ST : WN;
             break;
-        case WN3:
-            tourney_local_pred[index] = (outcome == TAKEN) ? WT3 : WN2;
-            break;
-        case WT3:
-            tourney_local_pred[index] = (outcome == TAKEN) ? WT2 : WN3;
-            break;
-        case WT2:
-            tourney_local_pred[index] = (outcome == TAKEN) ? WT1 : WT3;
-            break;
-        case WT1:
-            tourney_local_pred[index] = (outcome == TAKEN) ? ST0 : WT2;
-            break;
-        case ST0:
-            tourney_local_pred[index] = (outcome == TAKEN) ? ST0 : WT1;
+        case ST:
+            tourney_local_pred[index] = (outcome == TAKEN) ? ST : WT;
             break;
         default:
-            printf("Warning: Undefined state of entry in TOURNEY GLOBAL BHT!\n");
+            printf("Warning: Undefined state of entry in LOCAL TOURNEY BHT!\n");
             break;
+        // case SN0:
+        //     tourney_local_pred[index] = (outcome == TAKEN) ? WN1 : SN0;
+        //     break;
+        // case WN1:
+        //     tourney_local_pred[index] = (outcome == TAKEN) ? WN2 : SN0;
+        //     break;
+        // case WN2:
+        //     tourney_local_pred[index] = (outcome == TAKEN) ? WN3 : WN1;
+        //     break;
+        // case WN3:
+        //     tourney_local_pred[index] = (outcome == TAKEN) ? WT3 : WN2;
+        //     break;
+        // case WT3:
+        //     tourney_local_pred[index] = (outcome == TAKEN) ? WT2 : WN3;
+        //     break;
+        // case WT2:
+        //     tourney_local_pred[index] = (outcome == TAKEN) ? WT1 : WT3;
+        //     break;
+        // case WT1:
+        //     tourney_local_pred[index] = (outcome == TAKEN) ? ST0 : WT2;
+        //     break;
+        // case ST0:
+        //     tourney_local_pred[index] = (outcome == TAKEN) ? ST0 : WT1;
+        //     break;
+        // default:
+        //     printf("Warning: Undefined state of entry in TOURNEY GLOBAL BHT!\n");
+        //     break;
     }
 
     // Update state of entry in bht based on outcome
