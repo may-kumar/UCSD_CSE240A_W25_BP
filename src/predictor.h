@@ -49,6 +49,21 @@ extern const char *bpName[];
 
 #define DEC_CNTR(x) (x > 0) ? x-- : 0;
 #define INC_CNTR(x) (x < 3) ? x++ : 3;
+
+// Definitions for 3-bit counters
+#define SN0 0 // predict NT, strong not taken
+#define WN1 1 // predict NT, weak not taken
+#define WN2 2 // predict NT, weak not taken
+#define WN3 3 // predict NT, weak not taken
+#define WT3 4 // predict T, weak taken
+#define WT2 5 // predict T, weak taken
+#define WT1 6 // predict T, weak taken
+#define ST0 7 // predict T, strong taken
+
+
+#define DEC_3B_CNTR(x) (x > 0) ? x-- : 0;
+#define INC_3B_CNTR(x) (x < 7) ? x++ : 7;
+
 //------------------------------------//
 //      Predictor Configuration       //
 //------------------------------------//
