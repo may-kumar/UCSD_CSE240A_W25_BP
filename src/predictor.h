@@ -47,8 +47,8 @@ extern const char *bpName[];
 #define WL 2 // use Local
 #define SL 3 // use Local
 
-#define DEC_CNTR(x) (x > 0) ? x-- : 0;
-#define INC_CNTR(x) (x < 3) ? x++ : 3;
+#define DEC_CNTR(x) (x > 0) ? x-- : 0
+#define INC_CNTR(x) (x < 3) ? x++ : 3
 
 // Definitions for 3-bit counters
 #define SN0 0 // predict NT, strong not taken

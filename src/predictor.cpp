@@ -171,7 +171,7 @@ uint8_t tourney_predict_global(uint32_t pc)
     uint32_t global_bht_entries = 1 << tourney_ghistoryBits;
     uint32_t index = tourney_global_hr & (global_bht_entries - 1);
 
-    return tourney_global_pred[index] >= 2;
+    return (tourney_global_pred[index] >= 2) ? TAKEN : NOTTAKEN;
 }
 
 uint8_t tourney_predict_local(uint32_t pc)
@@ -180,7 +180,7 @@ uint8_t tourney_predict_local(uint32_t pc)
     uint32_t pht_index = pc & (local_bht_entries - 1);
     uint32_t index = tourney_local_ht[pht_index];
 
-    return tourney_local_pred[index] >= 2;
+    return (tourney_local_pred[index] >= 2) ? TAKEN : NOTTAKEN;
 }
 
 uint8_t tourney_predict(uint32_t pc)
@@ -264,6 +264,14 @@ uint32_t c_t7_entries = 1 << 10;
 
 int8_t W[1024][64];
 
+#define LOOP_ENTRIES 256
+uint32_t loop_cntr[LOOP_ENTRIES];
+uint32_t used_cntr[LOOP_ENTRIES];
+uint8_t age_cntr[LOOP_ENTRIES];
+uint8_t confidence[LOOP_ENTRIES];
+uint8_t hash_tag[LOOP_ENTRIES];
+bool init_entry[LOOP_ENTRIES];
+
 void init_custom()
 {
     int local_bht_entries = 1 << custom_lhistoryBits;
@@ -289,6 +297,14 @@ void init_custom()
     for (i = 0; i < choice_t_entries; i++)
     {
         custom_choice_pred[i] = SG;
+    }
+
+    for (i = 0 ; i < LOOP_ENTRIES; i++) {
+        loop_cntr[i] = 0;
+        used_cntr[i] = 0;
+        age_cntr[i] = 0;
+        confidence[i] = 0;
+        hash_tag[i] = 0;
     }
 }
 
@@ -321,6 +337,28 @@ uint8_t custom_predict(uint32_t pc)
     uint32_t choice_entries = 1 << custom_choiceBits;
     uint32_t index = custom_global_hr & (choice_entries - 1);
 
+    
+    uint8_t loop_tag = (uint32_t)(pc ^ (pc >> 8) ^ (pc >> 16) ^ (pc >> 24)) & ( (1 << 8) - 1 );
+    uint32_t i = 0;
+    for (i = 0; i < LOOP_ENTRIES; i++) {
+        if (hash_tag[i] == loop_tag) {
+            break;
+        }
+    }
+
+    if (i != LOOP_ENTRIES) {
+        if (confidence[i] == ST) {
+            if (loop_cntr[i] == used_cntr[i]) {
+                // printf("USING LOOP");
+                // printf("%0X\n", pc);
+                return !(init_entry[i]);
+            } else {
+                // printf("USING LOOP");
+                return init_entry[i];
+            }
+        }
+    }
+
     if (custom_choice_pred[index] >= 2)
         return local_pred;
     else
@@ -329,6 +367,66 @@ uint8_t custom_predict(uint32_t pc)
 
 void train_custom(uint32_t pc, uint8_t outcome)
 {
+    
+    uint8_t loop_tag = (uint32_t)(pc ^ (pc >> 8) ^ (pc >> 16) ^ (pc >> 24)) & ( (1 << 8) - 1 );
+    uint32_t i = 0;
+    for (i = 0; i < LOOP_ENTRIES; i++) {
+        if (hash_tag[i] == loop_tag) {
+            // printf("FOUND A LOOP");
+            break;
+        }
+    }
+
+    if (i != LOOP_ENTRIES) {
+        if (confidence[i] == SN) { //This is a new entry, we're still figuring things out
+            if (outcome == init_entry[i]) {
+                loop_cntr[i]++;
+            } else {
+                INC_CNTR(confidence[i]);
+            }
+        } else { //Ok we've seen this before and got a switch
+            if (outcome != init_entry[i]) {
+                if  (loop_cntr[i] == used_cntr[i]) {
+                    if (confidence[i] == ST) {
+                        age_cntr[i] = (age_cntr[i] != 255) ? age_cntr[i]++ : 255;
+                    } else {
+                        INC_CNTR(confidence[i]);
+                    }
+                    used_cntr[i] = 0;
+                } else {
+                    //This is not a loop
+                    age_cntr[i] = 0;
+                    hash_tag[i] = 0;
+                    confidence[i] = 0;
+                }
+            } else {
+                used_cntr[i]++;
+            }
+        }
+    } else {
+        uint8_t min_age = 255;
+        uint8_t min_idx = 0;
+        for (i = 0; i < LOOP_ENTRIES; i++) {
+            if (age_cntr[i] == 0) {
+                min_idx = i;
+                break;
+            }
+            age_cntr[i]--;
+            if (age_cntr[i] < min_age) {
+                min_age = age_cntr[i];
+                min_idx = i;
+            }
+        }
+        // printf("ADDING A LOOP");
+        loop_cntr[min_idx] = 0;
+        used_cntr[min_idx] = 0;
+        age_cntr[min_idx] = 255;
+        confidence[min_idx] = 0;
+        init_entry[min_idx] = outcome;
+        hash_tag[min_idx] = loop_tag;
+    }
+
+    
     uint8_t local_pred = custom_predict_local(pc);
     uint8_t global_pred = custom_predict_global(pc);
 
@@ -351,7 +449,7 @@ void train_custom(uint32_t pc, uint8_t outcome)
     uint32_t pht_index = pc & (local_bht_entries - 1);
     uint32_t local_index = custom_local_ht[pht_index];
 
-    uint64_t index = pc & ( (1 << 10 ) - 1);
+    uint64_t index = pc & ( (1 << 10 ) - 1 );
     int64_t y = 0;
 
     for (int i = 0; i < 64; i ++) {
