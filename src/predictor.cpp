@@ -48,7 +48,7 @@ uint64_t ghistory;
 // r = register
 uint32_t tourney_lhistoryBits = 10; // Number of bits used for Local History
 uint32_t tourney_ghistoryBits = 16; // Number of bits used for Global History
-uint32_t tourney_choiceBits = 16;   // Number of bits used for Choice Table
+uint32_t tourney_choiceBits = 15;   // Number of bits used for Choice Table
 uint32_t *tourney_local_ht;
 uint64_t tourney_global_hr;
 
@@ -236,31 +236,16 @@ void train_tourney(uint32_t pc, uint8_t outcome)
     tourney_local_ht[pht_index] = ((tourney_local_ht[pht_index] << 1) | outcome) & (local_bht_entries - 1);
 }
 
-// FOR THE CUSTOM PREDICTOR
+
 uint32_t custom_lhistoryBits = 10; // Number of bits used for Local History
 uint32_t custom_ghistoryBits = 16; // Number of bits used for Global History
-uint32_t custom_choiceBits = 16;   // Number of bits used for Choice Table
+uint32_t custom_choiceBits = 15;   // Number of bits used for Choice Table
 uint32_t *custom_local_ht;
 uint64_t custom_global_hr;
 
 uint8_t *custom_local_pred;
 uint8_t *custom_global_pred;
 uint8_t *custom_choice_pred;
-
-uint8_t c_t0_pred[1 << 15];
-
-uint8_t c_tx_tag[7][1024];
-uint8_t c_tx_u[7][1024];
-uint8_t c_tx_pred[7][1024];
-
-uint32_t c_t0_entries = 1 << 15;
-uint32_t c_t1_entries = 1 << 10;
-uint32_t c_t2_entries = 1 << 10;
-uint32_t c_t3_entries = 1 << 10;
-uint32_t c_t4_entries = 1 << 10;
-uint32_t c_t5_entries = 1 << 10;
-uint32_t c_t6_entries = 1 << 10;
-uint32_t c_t7_entries = 1 << 10;
 
 int8_t W[1024][64];
 
@@ -310,7 +295,7 @@ uint8_t custom_predict_local(uint32_t pc)
     uint32_t pht_index = pc & (local_bht_entries - 1);
     uint32_t index = custom_local_ht[pht_index];
 
-    return custom_local_pred[index] >= 2;
+    return (custom_local_pred[index] >= 2) ? TAKEN : NOTTAKEN;
 }
 
 uint8_t custom_predict(uint32_t pc)
@@ -379,7 +364,6 @@ void train_custom(uint32_t pc, uint8_t outcome)
     custom_global_hr = ((custom_global_hr << 1) | outcome);
     custom_local_ht[pht_index] = ((custom_local_ht[pht_index] << 1) | outcome) & (local_bht_entries - 1);
 }
-
 
 void init_predictor()
 {
