@@ -237,134 +237,185 @@ void train_tourney(uint32_t pc, uint8_t outcome)
 }
 
 
-uint32_t custom_lhistoryBits = 10; // Number of bits used for Local History
-uint32_t custom_ghistoryBits = 16; // Number of bits used for Global History
-uint32_t custom_choiceBits = 15;   // Number of bits used for Choice Table
-uint32_t *custom_local_ht;
-uint64_t custom_global_hr;
+// FOR THE CUSTOM PREDICTOR
+#define NO_TX_TABLES 5
 
-uint8_t *custom_local_pred;
-uint8_t *custom_global_pred;
-uint8_t *custom_choice_pred;
+#define C_T0_LBITS 10
+#define C_TX_LBITS 8
+#define C_T0_ENTRIES (1 << C_T0_LBITS)
+#define C_TX_ENTRIES (1 << C_TX_LBITS)
 
-int8_t W[1024][64];
+uint8_t c_t0_pred[C_T0_ENTRIES];
+
+uint8_t c_tx_tag[NO_TX_TABLES][C_TX_ENTRIES];
+uint8_t c_tx_u[NO_TX_TABLES][C_TX_ENTRIES];
+uint8_t c_tx_pred[NO_TX_TABLES][C_TX_ENTRIES];
+
+uint64_t c_ghr;
 
 void init_custom()
 {
-    int local_bht_entries = 1 << custom_lhistoryBits;
-    custom_local_pred = (uint8_t *)malloc(local_bht_entries * sizeof(uint8_t));
-    custom_local_ht = (uint32_t *)malloc(local_bht_entries * sizeof(uint32_t));
-    int i = 0;
-    for (i = 0; i < local_bht_entries; i++)
-    {
-        custom_local_pred[i] = WT;
-        custom_local_ht[i] = 0;
-    }
-
-    custom_global_hr = 0;
-    
-    for(int i = 0; i < 1024; i++) {
-        for(int j = 0; j < 32; j++) {
-            W[i][j] = 0;
-        }
-    }
-
-    int choice_t_entries = 1 << custom_choiceBits;
-    custom_choice_pred = (uint8_t *)malloc(choice_t_entries * sizeof(uint8_t));
-    for (i = 0; i < choice_t_entries; i++)
-    {
-        custom_choice_pred[i] = SG;
+    c_ghr = 0;
+    for (uint32_t i = 0; i < C_T0_ENTRIES; i++) {
+        c_t0_pred[i] = WT;
     }
 }
 
-uint8_t custom_predict_global(uint32_t pc)
+uint32_t c_index_hash(uint32_t pc, uint32_t t_idx)
 {
-    uint64_t index = pc & ( (1 << 10 ) - 1);
-    int64_t y = 0;
-
-    for (int i = 0; i < 64; i ++) {
-        y = y + W[index][63 - i] * ((custom_global_hr >> i) & 1);
+    if (t_idx == 0) {
+        return pc & (C_T0_ENTRIES - 1);
     }
 
-    return (y > 0) ? TAKEN : NOTTAKEN ;
+    uint32_t val = 0;
+    if (t_idx == 1) {
+        val = (uint64_t)(c_ghr & ((1 << 4) - 1));
+    } else {
+        for (uint8_t xor_stg = 0; xor_stg <= (1 << (t_idx - 2)); xor_stg++) {
+            uint8_t s = (uint64_t)(c_ghr >> (8*(xor_stg-1))) & ((1 << 8) - 1);
+            val = val ^ s;
+        }   
+    }
+
+    val = val ^ ((pc >> 8) & ((1 << 8) - 1));
+
+    return val;
 }
 
-uint8_t custom_predict_local(uint32_t pc)
+uint32_t c_tag_hash(uint32_t pc, uint32_t t_idx)
 {
-    uint32_t local_bht_entries = 1 << custom_lhistoryBits;
-    uint32_t pht_index = pc & (local_bht_entries - 1);
-    uint32_t index = custom_local_ht[pht_index];
+    uint32_t val = 0;
+    if (t_idx == 1) {
+        val = (uint64_t)(c_ghr & ((1 << 4) - 1));
+    } else {
+        for (uint8_t xor_stg = 0; xor_stg <= (1 << (t_idx - 2)); xor_stg++) {
+            uint8_t s = (uint64_t)(c_ghr >> (8*(xor_stg-1))) & ((1 << 8) - 1);
+            val = val ^ s;
+        }   
+    }
 
-    return (custom_local_pred[index] >= 2) ? TAKEN : NOTTAKEN;
+    val = val % 251;
+    val = val ^ (pc >> 8) & ((1 << 8) - 1);
+    return val;
 }
 
 uint8_t custom_predict(uint32_t pc)
 {
-    uint8_t local_pred = custom_predict_local(pc);
-    uint8_t global_pred = custom_predict_global(pc);
+    uint32_t tx = 0;
+    uint8_t tx_entry = 0;
 
-    uint32_t choice_entries = 1 << custom_choiceBits;
-    uint32_t index = custom_global_hr & (choice_entries - 1);
 
-    if (custom_choice_pred[index] >= 2)
-        return local_pred;
-    else
-        return global_pred;
+    for (tx = NO_TX_TABLES - 1; tx > 0; tx--)
+    {
+        tx_entry = c_index_hash(pc, tx);
+        if (c_tx_tag[tx][tx_entry] == c_tag_hash(pc, tx))
+        {
+            // match found in this table
+            // printf("Using tx table %0d %0d\n", tx, (c_tx_pred[tx][tx_entry] >= WT3));
+            return (c_tx_pred[tx][tx_entry] >= WT3) ? TAKEN : NOTTAKEN;
+        }
+    }
+
+    // no match was found
+    tx_entry = c_index_hash(pc, 0);
+    return (c_t0_pred[tx_entry] >= WT) ? TAKEN : NOTTAKEN;
 }
 
 void train_custom(uint32_t pc, uint8_t outcome)
 {
-    uint8_t local_pred = custom_predict_local(pc);
-    uint8_t global_pred = custom_predict_global(pc);
+    uint32_t tx = 0;
+    bool tx_matches[NO_TX_TABLES] = {false};
+    uint8_t tx_matches_cnt = 0;
+    uint8_t tx_entry = 0;
+    uint8_t tx_pred = 0;
 
-    uint32_t choice_entries = 1 << custom_choiceBits;
-    uint32_t choice_index = custom_global_hr & (choice_entries - 1);
-
-    if ((local_pred == outcome) && (global_pred != outcome))
+    for (tx = NO_TX_TABLES - 1; tx > 0; tx--)
     {
-        INC_CNTR(custom_choice_pred[choice_index]);
-    }
-    else if ((global_pred == outcome) && (local_pred != outcome))
-    {
-        DEC_CNTR(custom_choice_pred[choice_index]);
-    }
-
-    uint32_t global_bht_entries = 1 << custom_ghistoryBits;
-    uint32_t global_index = custom_global_hr & (global_bht_entries - 1);
-
-    uint32_t local_bht_entries = 1 << custom_lhistoryBits;
-    uint32_t pht_index = pc & (local_bht_entries - 1);
-    uint32_t local_index = custom_local_ht[pht_index];
-
-    uint64_t index = pc & ( (1 << 10 ) - 1 );
-    int64_t y = 0;
-
-    for (int i = 0; i < 64; i ++) {
-        y = y + W[index][63 - i] * ((custom_global_hr >> i) & 1);
-    }
-
-    int corr = (outcome == TAKEN) ? 1 : -1;
-    if( ((y < 0) != (corr < 0)) || (y < 32 && y > -32) )
-    {
-        for(int i = 0; i < 64; i++)
+        tx_entry = c_index_hash(pc, tx);
+        if (c_tx_tag[tx][tx_entry] == c_tag_hash(pc, tx))
         {
-            W[index][63 - i] += ((custom_global_hr >> i) & 1) * corr;
-        }           
+            tx_matches[tx] = true;
+            tx_pred = (tx_pred == 0) ? tx : tx_pred ;
+            tx_matches_cnt++;
+        }
     }
 
-    if (outcome == TAKEN)
-    {
-        INC_CNTR(custom_local_pred[local_index]);
-    }
-    else
-    {
-        DEC_CNTR(custom_local_pred[local_index]);
+    uint8_t pred = 0;
+    if (tx == 0) {
+        // no match was found
+        tx_entry = c_index_hash(pc, 0);
+        pred = (c_t0_pred[tx_entry] >= WT) ? TAKEN : NOTTAKEN;
+    } else {
+        tx_entry = c_index_hash(pc, tx_pred);
+        pred = (c_tx_pred[tx_pred][tx_entry] >= WT3) ? TAKEN : NOTTAKEN;
     }
 
-    custom_global_hr = ((custom_global_hr << 1) | outcome);
-    custom_local_ht[pht_index] = ((custom_local_ht[pht_index] << 1) | outcome) & (local_bht_entries - 1);
+
+    if (pred == outcome) {
+        INC_3B_CNTR(c_tx_pred[tx_pred][tx_entry]);
+        if (tx_matches_cnt == 1) {
+            tx_entry = c_index_hash(pc, tx_pred);
+            INC_CNTR(c_tx_u[tx_pred][tx_entry]);
+        } else {
+            //Subtracting u counters for alt-preds
+            for (uint32_t i = 1; i < tx_pred; i++) {
+                if (tx_matches[i] == true) {
+                    tx_entry = c_index_hash(pc, i);
+                    DEC_CNTR(c_tx_u[i][tx_entry]);
+                }
+            }
+        }
+    } else {
+        DEC_3B_CNTR(c_tx_pred[tx_pred][tx_entry]);
+        for (uint32_t i = 1; i < tx_pred; i++) {
+            if (tx_matches[i] == true) {
+                tx_entry = c_index_hash(pc, i);
+                uint8_t i_pred = (c_tx_pred[i][tx_entry] >= WT3) ? TAKEN : NOTTAKEN;
+                if (i_pred == outcome) {
+                    for (uint32_t j = i; j < tx_pred; j++) {
+                        if (tx_matches[j] == true) {
+                            tx_entry = c_index_hash(pc, j);
+                            DEC_CNTR(c_tx_u[j][tx_entry]);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        bool entry_promoted = false;
+
+        for (uint32_t i = tx_pred; i < NO_TX_TABLES; i++) {
+            tx_entry = c_index_hash(pc, i);
+            if (c_tx_u[i][tx_entry] == 0) {
+                entry_promoted = true;
+                c_tx_tag[i][tx_entry] = c_tag_hash(pc, i);
+                c_tx_u[i][tx_entry] = 0;
+                c_tx_pred[i][tx_entry] = WT;
+                break;
+            }
+        }
+
+        if (entry_promoted == false) {
+            for (uint32_t i = tx_pred; i < NO_TX_TABLES; i++) {
+                tx_entry = c_index_hash(pc, i);
+                DEC_CNTR(c_tx_u[i][tx_entry]);
+            }
+        }
+    }
+    
+    if (tx == 0) {
+        // no match was found
+        tx_entry = c_index_hash(pc, 0);
+        
+        if (outcome == TAKEN) {
+            INC_CNTR(c_t0_pred[tx_entry]);
+        } else {
+            DEC_CNTR(c_t0_pred[tx_entry]);
+        }
+    }
+
+    c_ghr = (c_ghr << 1) | outcome;
 }
-
 void init_predictor()
 {
     switch (bpType)
