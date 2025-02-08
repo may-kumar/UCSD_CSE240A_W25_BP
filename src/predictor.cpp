@@ -46,15 +46,16 @@ uint64_t ghistory;
 
 // t = table
 // r = register
-uint32_t tourney_lhistoryBits = 10; // Number of bits used for Local History
-uint32_t tourney_ghistoryBits = 16; // Number of bits used for Global History
-uint32_t tourney_choiceBits = 15;   // Number of bits used for Choice Table
-uint32_t *tourney_local_ht;
+#define tourney_lhistoryBits 16 // Number of bits used for Local History
+#define tourney_ghistoryBits 16 // Number of bits used for Global History
+#define tourney_choiceBits 16   // Number of bits used for Choice Table
+
 uint64_t tourney_global_hr;
 
-uint8_t *tourney_local_pred;
-uint8_t *tourney_global_pred;
-uint8_t *tourney_choice_pred;
+uint32_t tourney_local_ht[1 << tourney_lhistoryBits];
+uint8_t tourney_local_pred[1 << tourney_lhistoryBits];
+uint8_t tourney_global_pred[1 << tourney_ghistoryBits];
+uint8_t tourney_choice_pred[1 << tourney_choiceBits];
 
 //------------------------------------//
 //        Predictor Functions         //
@@ -141,27 +142,27 @@ void cleanup_gshare()
 void init_tourney()
 {
     int local_bht_entries = 1 << tourney_lhistoryBits;
-    tourney_local_pred = (uint8_t *)malloc(local_bht_entries * sizeof(uint8_t));
-    tourney_local_ht = (uint32_t *)malloc(local_bht_entries * sizeof(uint32_t));
+    // tourney_local_pred = (uint8_t *)malloc(local_bht_entries * sizeof(uint8_t));
+    // tourney_local_ht = (uint32_t *)malloc(local_bht_entries * sizeof(uint32_t));
     int i = 0;
     for (i = 0; i < local_bht_entries; i++)
     {
-        tourney_local_pred[i] = WT;
+        tourney_local_pred[i] = WN;
         tourney_local_ht[i] = 0;
     }
 
     int global_bht_entries = 1 << tourney_ghistoryBits;
-    tourney_global_pred = (uint8_t *)malloc(global_bht_entries * sizeof(uint8_t));
+    // tourney_global_pred = (uint8_t *)malloc(global_bht_entries * sizeof(uint8_t));
     for (i = 0; i < global_bht_entries; i++)
     {
-        tourney_global_pred[i] = WT;
+        tourney_global_pred[i] = WN;
     }
 
     int choice_t_entries = 1 << tourney_choiceBits;
-    tourney_choice_pred = (uint8_t *)malloc(choice_t_entries * sizeof(uint8_t));
+    // tourney_choice_pred = (uint8_t *)malloc(choice_t_entries * sizeof(uint8_t));
     for (i = 0; i < choice_t_entries; i++)
     {
-        tourney_choice_pred[i] = SG;
+        tourney_choice_pred[i] = WT;
     }
     tourney_global_hr = 0;
 }
@@ -178,7 +179,7 @@ uint8_t tourney_predict_local(uint32_t pc)
 {
     uint32_t local_bht_entries = 1 << tourney_lhistoryBits;
     uint32_t pht_index = pc & (local_bht_entries - 1);
-    uint32_t index = tourney_local_ht[pht_index];
+    uint32_t index = tourney_local_ht[pht_index] & (local_bht_entries - 1);
 
     return (tourney_local_pred[index] >= 2) ? TAKEN : NOTTAKEN;
 }
@@ -191,7 +192,7 @@ uint8_t tourney_predict(uint32_t pc)
     uint32_t choice_entries = 1 << tourney_choiceBits;
     uint32_t index = tourney_global_hr & (choice_entries - 1);
 
-    if (tourney_choice_pred[index] >= 2)
+    if (tourney_choice_pred[index] >= WT)
         return local_pred;
     else
         return global_pred;
@@ -219,7 +220,7 @@ void train_tourney(uint32_t pc, uint8_t outcome)
 
     uint32_t local_bht_entries = 1 << tourney_lhistoryBits;
     uint32_t pht_index = pc & (local_bht_entries - 1);
-    uint32_t local_index = tourney_local_ht[pht_index];
+    uint32_t local_index = tourney_local_ht[pht_index] & (local_bht_entries - 1);
 
     if (outcome == TAKEN)
     {
@@ -232,20 +233,22 @@ void train_tourney(uint32_t pc, uint8_t outcome)
         DEC_CNTR(tourney_local_pred[local_index]);
     }
 
-    tourney_global_hr = ((tourney_global_hr << 1) | outcome) & (global_bht_entries - 1);
-    tourney_local_ht[pht_index] = ((tourney_local_ht[pht_index] << 1) | outcome) & (local_bht_entries - 1);
+    tourney_global_hr = ((tourney_global_hr << 1) | outcome);
+    tourney_local_ht[pht_index] = ((tourney_local_ht[pht_index] << 1) | outcome);
 }
 
 
 // FOR THE CUSTOM PREDICTOR
-#define NO_TX_TABLES 5
+#define NO_TX_TABLES 7
 
-#define C_T0_LBITS 10
+#define C_T0_LBITS 15
 #define C_TX_LBITS 8
 #define C_T0_ENTRIES (1 << C_T0_LBITS)
 #define C_TX_ENTRIES (1 << C_TX_LBITS)
 
 uint8_t c_t0_pred[C_T0_ENTRIES];
+
+uint32_t cntr = 0;
 
 uint8_t c_tx_tag[NO_TX_TABLES][C_TX_ENTRIES];
 uint8_t c_tx_u[NO_TX_TABLES][C_TX_ENTRIES];
@@ -304,7 +307,6 @@ uint8_t custom_predict(uint32_t pc)
     uint32_t tx = 0;
     uint8_t tx_entry = 0;
 
-
     for (tx = NO_TX_TABLES - 1; tx > 0; tx--)
     {
         tx_entry = c_index_hash(pc, tx);
@@ -324,7 +326,7 @@ uint8_t custom_predict(uint32_t pc)
 void train_custom(uint32_t pc, uint8_t outcome)
 {
     uint32_t tx = 0;
-    bool tx_matches[NO_TX_TABLES] = {false};
+    bool tx_matches[NO_TX_TABLES] = {false, false, false, false, false};
     uint8_t tx_matches_cnt = 0;
     uint8_t tx_entry = 0;
     uint8_t tx_pred = 0;
@@ -337,10 +339,11 @@ void train_custom(uint32_t pc, uint8_t outcome)
             tx_matches[tx] = true;
             tx_pred = (tx_pred == 0) ? tx : tx_pred ;
             tx_matches_cnt++;
-        }
+        }   
     }
 
     uint8_t pred = 0;
+
     if (tx == 0) {
         // no match was found
         tx_entry = c_index_hash(pc, 0);
@@ -349,7 +352,6 @@ void train_custom(uint32_t pc, uint8_t outcome)
         tx_entry = c_index_hash(pc, tx_pred);
         pred = (c_tx_pred[tx_pred][tx_entry] >= WT3) ? TAKEN : NOTTAKEN;
     }
-
 
     if (pred == outcome) {
         INC_3B_CNTR(c_tx_pred[tx_pred][tx_entry]);
@@ -372,7 +374,7 @@ void train_custom(uint32_t pc, uint8_t outcome)
                 tx_entry = c_index_hash(pc, i);
                 uint8_t i_pred = (c_tx_pred[i][tx_entry] >= WT3) ? TAKEN : NOTTAKEN;
                 if (i_pred == outcome) {
-                    for (uint32_t j = i; j < tx_pred; j++) {
+                    for (uint32_t j = i; j < NO_TX_TABLES; j++) {
                         if (tx_matches[j] == true) {
                             tx_entry = c_index_hash(pc, j);
                             DEC_CNTR(c_tx_u[j][tx_entry]);
@@ -382,9 +384,10 @@ void train_custom(uint32_t pc, uint8_t outcome)
                 }
             }
         }
+
         bool entry_promoted = false;
 
-        for (uint32_t i = tx_pred; i < NO_TX_TABLES; i++) {
+        for (uint32_t i = tx_pred+1; (!entry_promoted) && (i < NO_TX_TABLES); i++) {
             tx_entry = c_index_hash(pc, i);
             if (c_tx_u[i][tx_entry] == 0) {
                 entry_promoted = true;
@@ -402,7 +405,7 @@ void train_custom(uint32_t pc, uint8_t outcome)
             }
         }
     }
-    
+
     if (tx == 0) {
         // no match was found
         tx_entry = c_index_hash(pc, 0);
@@ -415,6 +418,16 @@ void train_custom(uint32_t pc, uint8_t outcome)
     }
 
     c_ghr = (c_ghr << 1) | outcome;
+
+    cntr++;
+    if (cntr == 10000000/16) {
+        cntr = 0;
+        for (uint32_t i = 1; i < NO_TX_TABLES; i++) {
+            for (uint32_t j = 0; j < C_TX_ENTRIES; j++) {
+                c_tx_u[i][j] = 0;
+            }
+        }
+    }
 }
 void init_predictor()
 {
