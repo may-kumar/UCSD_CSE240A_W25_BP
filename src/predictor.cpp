@@ -468,7 +468,7 @@ void init_predictor()
         init_tourney();
         break;
     case CUSTOM:
-        init_custom();
+        init_tourney();
         break;
     default:
         break;
@@ -492,7 +492,7 @@ uint32_t make_prediction(uint32_t pc, uint32_t target, uint32_t direct)
     case TOURNAMENT:
         return tourney_predict(pc);
     case CUSTOM:
-        return custom_predict(pc);
+        return tourney_predict(pc);
     default:
         break;
     }
@@ -519,7 +519,7 @@ void train_predictor(uint32_t pc, uint32_t target, uint32_t outcome, uint32_t co
         case TOURNAMENT:
             return train_tourney(pc, outcome);
         case CUSTOM:
-            return train_custom(pc, outcome);
+            return train_tourney(pc, outcome);
         default:
             break;
         }
