@@ -96,7 +96,4 @@ void train_predictor(uint32_t pc, uint32_t target, uint32_t outcome, uint32_t co
 #define INC_3B_CNTR(cnt) (cnt = (cnt < 7) ? cnt + (cnt < 5 ? 2 : 1) : 7)
 #define DEC_3B_CNTR(cnt) (cnt = (cnt > 0) ? cnt - (cnt > 2 ? 2 : 1) : 0)
 
-
-
-
 #endif
