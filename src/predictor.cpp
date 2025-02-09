@@ -54,7 +54,7 @@ uint64_t ghistory;
 uint64_t tourney_global_hr;
 
 uint16_t tourney_local_ht[1 << tourney_lhistoryBits];
-uint8_t tourney_local_pred[1 << tourney_lbhthistoryBits];
+uint8_t tourney_local_pred[1 << tourney_lhistoryBits];
 uint8_t tourney_global_pred[1 << tourney_ghistoryBits];
 uint8_t tourney_choice_pred[1 << tourney_choiceBits];
 
