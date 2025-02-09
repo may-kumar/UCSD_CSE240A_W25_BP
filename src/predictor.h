@@ -38,34 +38,6 @@ extern const char *bpName[];
 #define WT 2 // predict T, weak taken
 #define ST 3 // predict T, strong taken
 
-
-/* Defines added by Mayank Kumar */
-
-// Definitions for 2bc for choice predictor
-#define SG 0 // use Global
-#define WG 1 // use Global
-#define WL 2 // use Local
-#define SL 3 // use Local
-
-#define DEC_CNTR(x) (x > 0) ? x-- : 0
-#define INC_CNTR(x) (x < 3) ? x++ : 3
-
-// Definitions for 3-bit counters
-#define SN0 0 // predict NT, strong not taken
-#define WN1 1 // predict NT, weak not taken
-#define WN2 2 // predict NT, weak not taken
-#define WN3 3 // predict NT, weak not taken
-#define WT3 4 // predict T, weak taken
-#define WT2 5 // predict T, weak taken
-#define WT1 6 // predict T, weak taken
-#define ST0 7 // predict T, strong taken
-
-
-// #define DEC_3B_CNTR(x) (x > 0) ? x-- : 0;
-// #define INC_3B_CNTR(x) (x < 7) ? x++ : 7;
-#define INC_3B_CNTR(cnt) (cnt = (cnt < 7) ? cnt + (cnt < 5 ? 2 : 1) : 7)
-#define DEC_3B_CNTR(cnt) (cnt = (cnt > 0) ? cnt - (cnt > 2 ? 2 : 1) : 0)
-
 //------------------------------------//
 //      Predictor Configuration       //
 //------------------------------------//
@@ -97,6 +69,33 @@ void train_predictor(uint32_t pc, uint32_t target, uint32_t outcome, uint32_t co
 
 // Please add your code below, and DO NOT MODIFY ANY OF THE CODE ABOVE
 // 
+/* Defines added by Mayank Kumar */
+
+// Definitions for 2bc for choice predictor
+#define SG 0 // use Global
+#define WG 1 // use Global
+#define WL 2 // use Local
+#define SL 3 // use Local
+
+#define DEC_CNTR(x) (x > SN) ? x-1 : SN
+#define INC_CNTR(x) (x < ST) ? x+1 : ST
+
+// Definitions for 3-bit counters
+#define SN0 0 // predict NT, strong not taken
+#define WN1 1 // predict NT, weak not taken
+#define WN2 2 // predict NT, weak not taken
+#define WN3 3 // predict NT, weak not taken
+#define WT3 4 // predict T, weak taken
+#define WT2 5 // predict T, weak taken
+#define WT1 6 // predict T, weak taken
+#define ST0 7 // predict T, strong taken
+
+
+// #define DEC_3B_CNTR(x) (x > 0) ? x-- : 0;
+// #define INC_3B_CNTR(x) (x < 7) ? x++ : 7;
+#define INC_3B_CNTR(cnt) (cnt = (cnt < 7) ? cnt + (cnt < 5 ? 2 : 1) : 7)
+#define DEC_3B_CNTR(cnt) (cnt = (cnt > 0) ? cnt - (cnt > 2 ? 2 : 1) : 0)
+
 
 
 
