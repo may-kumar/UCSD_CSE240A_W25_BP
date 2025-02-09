@@ -61,8 +61,10 @@ extern const char *bpName[];
 #define ST0 7 // predict T, strong taken
 
 
-#define DEC_3B_CNTR(x) (x > 0) ? x-- : 0;
-#define INC_3B_CNTR(x) (x < 7) ? x++ : 7;
+// #define DEC_3B_CNTR(x) (x > 0) ? x-- : 0;
+// #define INC_3B_CNTR(x) (x < 7) ? x++ : 7;
+#define INC_3B_CNTR(cnt) (cnt = (cnt < 7) ? cnt + (cnt < 5 ? 2 : 1) : 7)
+#define DEC_3B_CNTR(cnt) (cnt = (cnt > 0) ? cnt - (cnt > 2 ? 2 : 1) : 0)
 
 //------------------------------------//
 //      Predictor Configuration       //

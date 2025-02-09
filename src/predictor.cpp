@@ -46,14 +46,15 @@ uint64_t ghistory;
 
 // t = table
 // r = register
-#define tourney_lhistoryBits 16 // Number of bits used for Local History
+#define tourney_lhistoryBits 10 // Number of bits used for Local Pattern History 
+#define tourney_lbhthistoryBits 16 // Number of bits used for Local BHT 
 #define tourney_ghistoryBits 16 // Number of bits used for Global History
 #define tourney_choiceBits 16   // Number of bits used for Choice Table
 
 uint64_t tourney_global_hr;
 
-uint32_t tourney_local_ht[1 << tourney_lhistoryBits];
-uint8_t tourney_local_pred[1 << tourney_lhistoryBits];
+uint16_t tourney_local_ht[1 << tourney_lhistoryBits];
+uint8_t tourney_local_pred[1 << tourney_lbhthistoryBits];
 uint8_t tourney_global_pred[1 << tourney_ghistoryBits];
 uint8_t tourney_choice_pred[1 << tourney_choiceBits];
 
@@ -147,9 +148,15 @@ void init_tourney()
     int i = 0;
     for (i = 0; i < local_bht_entries; i++)
     {
-        tourney_local_pred[i] = WN;
         tourney_local_ht[i] = 0;
     }
+
+    int local_pbht_entries = 1 << tourney_lbhthistoryBits;
+    for (i = 0; i < local_pbht_entries; i++)
+    {
+        tourney_local_pred[i] = WN;
+    }
+
 
     int global_bht_entries = 1 << tourney_ghistoryBits;
     // tourney_global_pred = (uint8_t *)malloc(global_bht_entries * sizeof(uint8_t));
@@ -178,8 +185,9 @@ uint8_t tourney_predict_global(uint32_t pc)
 uint8_t tourney_predict_local(uint32_t pc)
 {
     uint32_t local_bht_entries = 1 << tourney_lhistoryBits;
+    uint32_t local_pbht_entries = 1 << tourney_lbhthistoryBits;
     uint32_t pht_index = pc & (local_bht_entries - 1);
-    uint32_t index = tourney_local_ht[pht_index] & (local_bht_entries - 1);
+    uint32_t index = tourney_local_ht[pht_index] & (local_pbht_entries - 1);
 
     return (tourney_local_pred[index] >= 2) ? TAKEN : NOTTAKEN;
 }
@@ -219,8 +227,9 @@ void train_tourney(uint32_t pc, uint8_t outcome)
     uint32_t global_index = tourney_global_hr & (global_bht_entries - 1);
 
     uint32_t local_bht_entries = 1 << tourney_lhistoryBits;
+    uint32_t local_pbht_entries = 1 << tourney_lbhthistoryBits;
     uint32_t pht_index = pc & (local_bht_entries - 1);
-    uint32_t local_index = tourney_local_ht[pht_index] & (local_bht_entries - 1);
+    uint32_t local_index = tourney_local_ht[pht_index] & (local_pbht_entries - 1);
 
     if (outcome == TAKEN)
     {
@@ -239,196 +248,179 @@ void train_tourney(uint32_t pc, uint8_t outcome)
 
 
 // FOR THE CUSTOM PREDICTOR
-#define NO_TX_TABLES 7
+#define NUM_TABLES 8
+#define BIMODAL_SIZE 16384  // 16K entries
+#define TAG_BITS 14
+#define MAX_HISTORY 1024
+#define GHR_LENGTH 512
 
-#define C_T0_LBITS 15
-#define C_TX_LBITS 8
-#define C_T0_ENTRIES (1 << C_T0_LBITS)
-#define C_TX_ENTRIES (1 << C_TX_LBITS)
+// Geometric history lengths (4, 6, 10, 16, 25, 40, 64, 102, 164, 262, 420, 672)
+// const uint32_t HIST_LENGTHS[NUM_TABLES] = {4,6,10,16,25,40,64,102,164,262,420,672};
+const uint32_t HIST_LENGTHS[NUM_TABLES] = {4,6,10,16,25,40,64,102};
 
-uint8_t c_t0_pred[C_T0_ENTRIES];
+typedef struct {
+    uint16_t tag;
+    uint8_t ctr;
+    uint8_t useful;
+} TageEntry;
 
-uint32_t cntr = 0;
+// Predictor components
+uint8_t bimodal[BIMODAL_SIZE];
+TageEntry tage_tables[NUM_TABLES][BIMODAL_SIZE];  // 196KB per table
 
-uint8_t c_tx_tag[NO_TX_TABLES][C_TX_ENTRIES];
-uint8_t c_tx_u[NO_TX_TABLES][C_TX_ENTRIES];
-uint8_t c_tx_pred[NO_TX_TABLES][C_TX_ENTRIES];
+// History components
+uint8_t ghr[MAX_HISTORY];
+uint32_t ghr_ptr;
+uint64_t path_history;
 
-uint64_t c_ghr;
+// Enhanced statistical corrector
+uint8_t sc_table[BIMODAL_SIZE];  // 16K entries
 
-void init_custom()
-{
-    c_ghr = 0;
-    for (uint32_t i = 0; i < C_T0_ENTRIES; i++) {
-        c_t0_pred[i] = WT;
+// Folding function for large histories
+static inline uint64_t fold_hash(uint64_t val, uint32_t bits) {
+    if (bits >= 64) {
+        return val; // No need to fold if bits == full width
     }
+
+    uint64_t folded = 0;
+    uint32_t remaining_bits = 64;
+    
+    while (remaining_bits > 0) {
+        uint32_t current_shift = (remaining_bits > bits) ? bits : remaining_bits;
+        folded ^= val & ((1ULL << current_shift) - 1);
+        val >>= current_shift;
+        remaining_bits -= current_shift;
+    }
+    return folded;
 }
 
-uint32_t c_index_hash(uint32_t pc, uint32_t t_idx)
-{
-    if (t_idx == 0) {
-        return pc & (C_T0_ENTRIES - 1);
+void init_custom() {
+    // Initialize bimodal table
+    for(int i=0; i<BIMODAL_SIZE; i++) {
+        bimodal[i] = 4;  // Weakly taken (4/7)
     }
-
-    uint32_t val = 0;
-    if (t_idx == 1) {
-        val = (uint64_t)(c_ghr & ((1 << 4) - 1));
-    } else {
-        for (uint8_t xor_stg = 0; xor_stg <= (1 << (t_idx - 2)); xor_stg++) {
-            uint8_t s = (uint64_t)(c_ghr >> (8*(xor_stg-1))) & ((1 << 8) - 1);
-            val = val ^ s;
-        }   
+    
+    // Initialize TAGE tables
+    for(int t=0; t<NUM_TABLES; t++) {
+        for(int i=0; i<BIMODAL_SIZE; i++) {
+            tage_tables[t][i].tag = 0;
+            tage_tables[t][i].ctr = 4;  // Weakly taken
+            tage_tables[t][i].useful = 0;
+        }
     }
-
-    val = val ^ ((pc >> 8) & ((1 << 8) - 1));
-
-    return val;
+    
+    // Initialize history
+    ghr_ptr = 0;
+    path_history = 0;
+    for(int i=0; i<MAX_HISTORY; i++) ghr[i] = 0;
+    
+    // Initialize statistical corrector
+    for(int i=0; i<BIMODAL_SIZE; i++) sc_table[i] = 4;
 }
 
-uint32_t c_tag_hash(uint32_t pc, uint32_t t_idx)
-{
-    uint32_t val = 0;
-    if (t_idx == 1) {
-        val = (uint64_t)(c_ghr & ((1 << 4) - 1));
-    } else {
-        for (uint8_t xor_stg = 0; xor_stg <= (1 << (t_idx - 2)); xor_stg++) {
-            uint8_t s = (uint64_t)(c_ghr >> (8*(xor_stg-1))) & ((1 << 8) - 1);
-            val = val ^ s;
-        }   
-    }
+uint8_t custom_predict(uint32_t pc) {
+    // Base prediction from bimodal
+    uint32_t bimodal_idx = pc % BIMODAL_SIZE;
+    uint8_t pred = bimodal[bimodal_idx] >= 4;
+    int provider = -1;
 
-    val = val % 251;
-    val = val ^ (pc >> 8) & ((1 << 8) - 1);
-    return val;
-}
-
-uint8_t custom_predict(uint32_t pc)
-{
-    uint32_t tx = 0;
-    uint8_t tx_entry = 0;
-
-    for (tx = NO_TX_TABLES - 1; tx > 0; tx--)
-    {
-        tx_entry = c_index_hash(pc, tx);
-        if (c_tx_tag[tx][tx_entry] == c_tag_hash(pc, tx))
-        {
-            // match found in this table
-            // printf("Using tx table %0d %0d\n", tx, (c_tx_pred[tx][tx_entry] >= WT3));
-            return (c_tx_pred[tx][tx_entry] >= WT3) ? TAKEN : NOTTAKEN;
-        }
-    }
-
-    // no match was found
-    tx_entry = c_index_hash(pc, 0);
-    return (c_t0_pred[tx_entry] >= WT) ? TAKEN : NOTTAKEN;
-}
-
-void train_custom(uint32_t pc, uint8_t outcome)
-{
-    uint32_t tx = 0;
-    bool tx_matches[NO_TX_TABLES] = {false, false, false, false, false};
-    uint8_t tx_matches_cnt = 0;
-    uint8_t tx_entry = 0;
-    uint8_t tx_pred = 0;
-
-    for (tx = NO_TX_TABLES - 1; tx > 0; tx--)
-    {
-        tx_entry = c_index_hash(pc, tx);
-        if (c_tx_tag[tx][tx_entry] == c_tag_hash(pc, tx))
-        {
-            tx_matches[tx] = true;
-            tx_pred = (tx_pred == 0) ? tx : tx_pred ;
-            tx_matches_cnt++;
-        }   
-    }
-
-    uint8_t pred = 0;
-
-    if (tx == 0) {
-        // no match was found
-        tx_entry = c_index_hash(pc, 0);
-        pred = (c_t0_pred[tx_entry] >= WT) ? TAKEN : NOTTAKEN;
-    } else {
-        tx_entry = c_index_hash(pc, tx_pred);
-        pred = (c_tx_pred[tx_pred][tx_entry] >= WT3) ? TAKEN : NOTTAKEN;
-    }
-
-    if (pred == outcome) {
-        INC_3B_CNTR(c_tx_pred[tx_pred][tx_entry]);
-        if (tx_matches_cnt == 1) {
-            tx_entry = c_index_hash(pc, tx_pred);
-            INC_CNTR(c_tx_u[tx_pred][tx_entry]);
-        } else {
-            //Subtracting u counters for alt-preds
-            for (uint32_t i = 1; i < tx_pred; i++) {
-                if (tx_matches[i] == true) {
-                    tx_entry = c_index_hash(pc, i);
-                    DEC_CNTR(c_tx_u[i][tx_entry]);
-                }
-            }
-        }
-    } else {
-        DEC_3B_CNTR(c_tx_pred[tx_pred][tx_entry]);
-        for (uint32_t i = 1; i < tx_pred; i++) {
-            if (tx_matches[i] == true) {
-                tx_entry = c_index_hash(pc, i);
-                uint8_t i_pred = (c_tx_pred[i][tx_entry] >= WT3) ? TAKEN : NOTTAKEN;
-                if (i_pred == outcome) {
-                    for (uint32_t j = i; j < NO_TX_TABLES; j++) {
-                        if (tx_matches[j] == true) {
-                            tx_entry = c_index_hash(pc, j);
-                            DEC_CNTR(c_tx_u[j][tx_entry]);
-                        }
-                    }
-                    break;
-                }
-            }
-        }
-
-        bool entry_promoted = false;
-
-        for (uint32_t i = tx_pred+1; (!entry_promoted) && (i < NO_TX_TABLES); i++) {
-            tx_entry = c_index_hash(pc, i);
-            if (c_tx_u[i][tx_entry] == 0) {
-                entry_promoted = true;
-                c_tx_tag[i][tx_entry] = c_tag_hash(pc, i);
-                c_tx_u[i][tx_entry] = 0;
-                c_tx_pred[i][tx_entry] = WT;
-                break;
-            }
-        }
-
-        if (entry_promoted == false) {
-            for (uint32_t i = tx_pred; i < NO_TX_TABLES; i++) {
-                tx_entry = c_index_hash(pc, i);
-                DEC_CNTR(c_tx_u[i][tx_entry]);
-            }
-        }
-    }
-
-    if (tx == 0) {
-        // no match was found
-        tx_entry = c_index_hash(pc, 0);
+    // TAGE prediction
+    for(int t=NUM_TABLES-1; t>=0; t--) {
+        uint64_t hist = fold_hash(path_history, HIST_LENGTHS[t]);
+        uint32_t idx = (pc ^ hist ^ fold_hash(ghr[ghr_ptr], HIST_LENGTHS[t])) % BIMODAL_SIZE;
+        uint16_t tag = (pc >> 2) ^ (hist >> 16) ^ (ghr[ghr_ptr] << 4);
         
-        if (outcome == TAKEN) {
-            INC_CNTR(c_t0_pred[tx_entry]);
-        } else {
-            DEC_CNTR(c_t0_pred[tx_entry]);
+        if(tage_tables[t][idx].tag == (tag & ((1 << TAG_BITS)-1))) {
+            provider = t;
+            pred = tage_tables[t][idx].ctr >= 4;
+            break;
         }
     }
 
-    c_ghr = (c_ghr << 1) | outcome;
+    // Statistical corrector
+    uint32_t sc_idx = (pc ^ fold_hash(path_history, 16)) % BIMODAL_SIZE;
+    uint8_t sc_pred = sc_table[sc_idx] >= 4;
 
-    cntr++;
-    if (cntr == 10000000/16) {
-        cntr = 0;
-        for (uint32_t i = 1; i < NO_TX_TABLES; i++) {
-            for (uint32_t j = 0; j < C_TX_ENTRIES; j++) {
-                c_tx_u[i][j] = 0;
+    // Combined prediction
+    return (pred != sc_pred) ? sc_pred : pred;
+}
+
+void train_custom(uint32_t pc, uint8_t outcome) {
+    // Update bimodal
+    uint32_t bimodal_idx = pc % BIMODAL_SIZE;
+    if(outcome) {
+        bimodal[bimodal_idx] += (bimodal[bimodal_idx] < 7) ? 1 : 0;
+    } else {
+        bimodal[bimodal_idx] -= (bimodal[bimodal_idx] > 0) ? 1 : 0;
+    }
+
+    // TAGE update
+    int provider = -1;
+    int alloc_table = -1;
+    
+    // Find provider and potential allocation candidates
+    for(int t=NUM_TABLES-1; t>=0; t--) {
+        uint64_t hist = fold_hash(path_history, HIST_LENGTHS[t]);
+        uint32_t idx = (pc ^ hist ^ fold_hash(ghr[ghr_ptr], HIST_LENGTHS[t])) % BIMODAL_SIZE;
+        uint16_t tag = (pc >> 2) ^ (hist >> 16) ^ (ghr[ghr_ptr] << 4);
+        
+        if(tage_tables[t][idx].tag == (tag & ((1 << TAG_BITS)-1))) {
+            if(provider == -1) {
+                provider = t;
+                // Update counter
+                if(outcome) {
+                    tage_tables[t][idx].ctr += (tage_tables[t][idx].ctr < 7) ? 1 : 0;
+                } else {
+                    tage_tables[t][idx].ctr -= (tage_tables[t][idx].ctr > 0) ? 1 : 0;
+                }
+            }
+            // Update usefulness
+            if(tage_tables[t][idx].useful > 0) {
+                tage_tables[t][idx].useful--;
+            }
+        } else if(alloc_table == -1 && tage_tables[t][idx].useful == 0) {
+            alloc_table = t;
+        }
+    }
+
+    // Allocation logic
+    if((provider == -1) || (tage_tables[provider][0].ctr >= 4) != outcome) {
+        if(alloc_table == -1) {
+            // Find table with least useful entries
+            uint8_t min_useful = 7;
+            for(int t=0; t<NUM_TABLES; t++) {
+                uint32_t idx = (pc + t) % BIMODAL_SIZE;
+                if(tage_tables[t][idx].useful < min_useful) {
+                    min_useful = tage_tables[t][idx].useful;
+                    alloc_table = t;
+                }
             }
         }
+        
+        if(alloc_table != -1) {
+            uint64_t hist = fold_hash(path_history, HIST_LENGTHS[alloc_table]);
+            uint32_t idx = (pc ^ hist ^ fold_hash(ghr[ghr_ptr], HIST_LENGTHS[alloc_table])) % BIMODAL_SIZE;
+            tage_tables[alloc_table][idx].tag = (pc >> 2) ^ (hist >> 16) ^ (ghr[ghr_ptr] << 4);
+            tage_tables[alloc_table][idx].ctr = outcome ? 6 : 2;
+            tage_tables[alloc_table][idx].useful = 3;
+        }
     }
+
+    // Update statistical corrector
+    uint32_t sc_idx = (pc ^ fold_hash(path_history, 16)) % BIMODAL_SIZE;
+    if(outcome) {
+        sc_table[sc_idx] += (sc_table[sc_idx] < 7) ? 1 : 0;
+    } else {
+        sc_table[sc_idx] -= (sc_table[sc_idx] > 0) ? 1 : 0;
+    }
+
+    // Update history
+    ghr[ghr_ptr] = (ghr[ghr_ptr] << 1) | outcome;
+    ghr_ptr = (ghr_ptr + 1) % GHR_LENGTH;
+    path_history = (path_history << 1) | (pc & 1);
 }
+
+
 void init_predictor()
 {
     switch (bpType)
