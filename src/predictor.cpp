@@ -178,7 +178,7 @@ uint8_t tourney_predict_global(uint32_t pc)
     uint32_t global_bht_entries = 1 << tourney_ghistoryBits;
     uint32_t index = tourney_global_hr & (global_bht_entries - 1);
 
-    return (tourney_global_pred[index] >= 2) ? TAKEN : NOTTAKEN;
+    return (tourney_global_pred[index] >= WT) ? TAKEN : NOTTAKEN;
 }
 
 uint8_t tourney_predict_local(uint32_t pc)
@@ -190,7 +190,7 @@ uint8_t tourney_predict_local(uint32_t pc)
 
     if (index > 1023) index = 0;
 
-    return (tourney_local_pred[index] >= 2) ? TAKEN : NOTTAKEN;
+    return (tourney_local_pred[index] >= WT) ? TAKEN : NOTTAKEN;
 }
 
 uint8_t tourney_predict(uint32_t pc)
